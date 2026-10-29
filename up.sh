@@ -12,12 +12,16 @@ case "${1:-help}" in
       sycl)   OVERRIDE="docker-compose.sycl.yml" ;;
       *)      echo "Unknown LLAMA_BACKEND: $BACKEND (expected 'cuda', 'vulkan' or 'sycl')"; exit 1 ;;
     esac
-    echo "Starting with backend: $BACKEND"
-    docker compose -f docker-compose.yml -f "$OVERRIDE" up -d --build
+    EXTRA=()
+    [ "${RADIANCE:-0}" = 1 ] && EXTRA=(-f docker-compose.radiance.yml)
+    echo "Starting with backend: $BACKEND${EXTRA:+ + radiance}"
+    docker compose -f docker-compose.yml -f "$OVERRIDE" "${EXTRA[@]}" up -d --build
     ;;
   down)
     BACKEND="${LLAMA_BACKEND:-cuda}"
-    docker compose -f docker-compose.yml -f "docker-compose.${BACKEND}.yml" down
+    EXTRA=()
+    [ "${RADIANCE:-0}" = 1 ] && EXTRA=(-f docker-compose.radiance.yml)
+    docker compose -f docker-compose.yml -f "docker-compose.${BACKEND}.yml" "${EXTRA[@]}" down
     ;; 
   *)
     echo "Usage: $0 {up|down}"

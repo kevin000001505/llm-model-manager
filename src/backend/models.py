@@ -9,6 +9,8 @@ class ModelSetup(BaseModel):
     original_name: str = ""
     parameters: str
     revision: str = "latest"
+    backend: str = "llama"  # "llama" (GGUF via llama-server) or "radiance" (.rad container)
+    gpu: str = "all"  # a GPUS name, or "all"
 
 
 class RevisionDeleteReq(BaseModel):

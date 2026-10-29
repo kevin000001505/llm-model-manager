@@ -54,6 +54,38 @@ State is persisted in `/models/served/state.json`. Model cache lives at `/models
 | `POST` | `/api/rpc_mode` | Toggle RPC mode for combining GPU power |
 | `WS` | `/ws` | Real-time state updates |
 
+## GPU Placement
+
+Name your cards in `.env` with their llama.cpp device names (`llama-server --list-devices`):
+
+```bash
+GPUS=r9700:Vulkan0,b50:Vulkan1
+```
+
+The deploy form then gets a **GPU** choice per config: one card, or *All GPUs*. llama-server is
+started with `--device` for that card, and llama-swap's matrix router lets configs on different
+cards run at the same time. A config on a card that is busy swaps out the one there; an *All GPUs*
+config runs alone. Without `GPUS`, nothing changes: every config uses every card, one at a time.
+
+## radiance Backend
+
+[radiance](https://codeberg.org/StillDeadcode/radiance) serves `.rad` containers (e.g.
+`StillDeadcode/qwen3.8-27b-mxfp4`) on AMD RDNA4 cards. To turn it on, add
+`docker-compose.radiance.yml` to `COMPOSE_FILE` (or `RADIANCE=1 ./up.sh up`) and set:
+
+```bash
+RADIANCE_GPU=r9700   # the GPUS entry radiance runs on
+RENDER_GID=992       # getent group render | cut -d: -f3
+VIDEO_GID=44         # getent group video | cut -d: -f3
+```
+
+Pick **radiance** as the backend (a repo of `.rad` files only selects it by itself), choose the
+`.rad` file, and deploy. The params JSON holds radiance's own flags (`tp`, `max-model-len`,
+`kv-cache-dtype`, ...). llama-swap starts each radiance config as a sibling container on the
+`llm-llama-net` network and stops it on swap, so a radiance config and llama.cpp configs share its
+card the same way llama.cpp configs do. The override mounts the docker socket into llama-swap,
+which gives it root on the host.
+
 ## RPC Mode
 
 Enable RPC mode to combine GPU power across multiple machines. Only models with `"rpc": true` in their parameters are synced when RPC mode is active. Toggle via the RPC Mode switch in the UI or:

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.api import (
     delete_config,
     delete_revision,
+    get_gpus,
     get_local_models,
     get_quants,
     setup_model,
@@ -133,6 +134,11 @@ async def api_branches(repo: str):
 @app.get("/api/models")
 async def api_models():
     return await get_local_models()
+
+
+@app.get("/api/gpus")
+async def api_gpus():
+    return await get_gpus()
 
 
 @app.post("/api/rpc_mode")

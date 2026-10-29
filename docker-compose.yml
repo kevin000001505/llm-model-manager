@@ -1,5 +1,7 @@
 networks:
   llama-net:
+    # A fixed name: radiance containers join it, and llama-swap reaches them by container name.
+    name: ${LLAMA_NET:-llm-llama-net}
 
 services:
   llm-model-manager:
@@ -11,6 +13,7 @@ services:
     restart: unless-stopped
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - GPUS=${GPUS:-}
       # - LOG_LEVEL=DEBUG # Uncomment for verbose logging
     ports:
       - "8000:8000"

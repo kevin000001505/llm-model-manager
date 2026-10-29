@@ -1,5 +1,5 @@
 services:
   llama-swap:
     devices:
-      - /dev/dri/renderD128:/dev/dri/renderD128
-      - /dev/dri/card0:/dev/dri/card0
+      # Every card: a config's GPU picks its llama.cpp device (--device VulkanN), see GPUS in .env.
+      - /dev/dri:/dev/dri

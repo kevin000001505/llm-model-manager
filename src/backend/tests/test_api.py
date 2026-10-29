@@ -190,6 +190,18 @@ class TestDeleteRevision:
 
 
 class TestSetupModel:
+    @pytest.mark.parametrize("name,quant", [("", "Q4_K_M"), ("   ", "Q4_K_M"), ("m", ""), ("m", "  ")])
+    @patch("backend.api.resolve_sha")
+    @pytest.mark.asyncio
+    async def test_rejects_empty_name_or_quant(self, mock_resolve, name, quant, empty_state):
+        from fastapi import HTTPException
+        req = ModelSetup(hf_repo="test/repo", quant=quant, symlink_name=name, parameters="{}")
+        with pytest.raises(HTTPException) as exc_info:
+            await setup_model(req, MagicMock())
+        assert exc_info.value.status_code == 400
+        mock_resolve.assert_not_called()
+        assert load_state() == {}
+
     @patch("backend.api.resolve_sha")
     @patch("backend.api.pre_flight_size")
     @patch("backend.api.shutil")

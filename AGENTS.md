@@ -61,6 +61,13 @@ LLAMA_BACKEND=openvino ./up.sh
 - **Sync tests** create mock cache objects matching `scan_cache_dir` return structure: `repos` → `repo_id`, `revisions` → `commit_hash`, `files` → `file_name`/`file_path`/`size_on_disk`.
 - **Frontend tests** use httpx + BeautifulSoup (no browser required). A test server fixture starts an isolated backend with patched paths.
 
+## GPU placement & radiance
+- `GPUS=name:VulkanN,...` (config.py `parse_gpus`) enables per-config placement. `sync.py` adds `--device` and a llama-swap **matrix** routing section (one model per card, `all` configs alone). llama-swap v250 has no `capacity` router, so matrix it is.
+- `backend: radiance` configs serve a `.rad` file (the "quant" is its filename) through `docker run` from llama-swap (`radiance_entry`). Needs `MODELS_HOST` (host path of /models) from `docker-compose.radiance.yml`; without it the backend is off.
+- radiance args go into a single-quoted `sh -c`, so `SAFE_ARG` limits them; `/api/setup` rejects anything else.
+- `restart_llama_swap` stops containers labelled `llm-model-manager.radiance=1` first: they are siblings, not children.
+- Tests: `src/backend/tests/test_gpu_radiance.py`.
+
 ## RPC Mode
 
 Toggle via `/api/rpc_mode` — only models with `"rpc": true` in their params are synced when RPC mode is active. Filtered view in the UI shows RPC or Local configs based on the toggle state.

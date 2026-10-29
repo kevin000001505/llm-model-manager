@@ -10,8 +10,14 @@ const AppState = (() => {
     let lastCommitsStr = "";
     let selectedBranch = "main";
     let isRpcMode = false;
+    let gpuInfo = { gpus: [], radiance: { enabled: false, gpu: "all" } };
+    let lastQuantData = null;
 
     return {
+        get gpuInfo() { return gpuInfo; },
+        set gpuInfo(val) { gpuInfo = val; },
+        get lastQuantData() { return lastQuantData; },
+        set lastQuantData(val) { lastQuantData = val; },
         get currentConfigs() { return currentConfigs; },
         set currentConfigs(val) { currentConfigs = val; },
         get localModels() { return localModels; },
@@ -44,6 +50,15 @@ const AppState = (() => {
                 "top-p": 0.95,
                 "top-k": 40,
                 "min-p": 0
+            };
+        },
+        // radiance's own flags, not llama-server's: one card, fp8 KV cache, 200K context.
+        getRadianceDefaultParams() {
+            return {
+                "tp": 1,
+                "max-num-seqs": 8,
+                "max-model-len": 200000,
+                "kv-cache-dtype": "fp8"
             };
         }
     };

@@ -21,6 +21,123 @@ const Form = (() => {
         Utils.getEl("setupForm").addEventListener("submit", handleFormSubmit);
         Utils.getEl("commit_select").addEventListener("change", onCommitSelectChange);
         Utils.getEl("commit_sha").addEventListener("input", onCommitShaInput);
+        Utils.getEl("backend").addEventListener("change", () => applyBackend(true));
+
+        loadGpus();
+    }
+
+    // --- Backend & GPU placement ---
+    async function loadGpus() {
+        try {
+            AppState.gpuInfo = await Api.fetchGpus();
+        } catch (e) {
+            console.error("fetchGpus failed:", e);
+            return;
+        }
+        const { gpus, radiance } = AppState.gpuInfo;
+        const gpuSelect = Utils.getEl("gpu");
+        gpuSelect.innerHTML = '<option value="all">All GPUs</option>';
+        gpus.forEach(g => {
+            const opt = document.createElement("option");
+            opt.value = g.name;
+            opt.textContent = `${g.name} (${g.device})`;
+            gpuSelect.appendChild(opt);
+        });
+        Utils.getEl("gpu_container").classList.toggle("hidden", gpus.length === 0);
+        Utils.getEl("backend_container").classList.toggle("hidden", !radiance.enabled);
+    }
+
+    function radianceEnabled() {
+        return AppState.gpuInfo.radiance.enabled;
+    }
+
+    function getBackend() {
+        return Utils.getEl("backend").value;
+    }
+
+    function sameParams(a, b) {
+        try {
+            return JSON.stringify(JSON.parse(a)) === JSON.stringify(b);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // radiance runs on its own GPU, takes no mmproj and has no MTP toggle; llama.cpp gets them back.
+    // With swapDefaults, untouched default params are swapped for the other backend's defaults.
+    function applyBackend(swapDefaults) {
+        const isRadiance = getBackend() === "radiance";
+        const gpuSelect = Utils.getEl("gpu");
+        if (isRadiance) {
+            gpuSelect.value = AppState.gpuInfo.radiance.gpu;
+        }
+        gpuSelect.disabled = isRadiance;
+        Utils.getEl("mtp_container").classList.toggle("hidden", isRadiance);
+
+        if (swapDefaults) {
+            const llamaDefaults = AppState.getDefaultParams();
+            const radianceDefaults = AppState.getRadianceDefaultParams();
+            if (isRadiance && sameParams(paramInput.value, llamaDefaults)) {
+                paramInput.value = JSON.stringify(radianceDefaults, null, 2);
+            } else if (!isRadiance && sameParams(paramInput.value, radianceDefaults)) {
+                paramInput.value = JSON.stringify(llamaDefaults, null, 2);
+            }
+            paramInput.dispatchEvent(new Event("input"));
+        }
+        renderQuantOptions();
+    }
+
+    function setPlacement(backend, gpu) {
+        Utils.getEl("backend").value = backend === "radiance" && radianceEnabled() ? "radiance" : "llama";
+        Utils.getEl("gpu").value = gpu || "all";
+        applyBackend(false);
+    }
+
+    // Fill the quant select from the last /api/quants answer: GGUF quants for llama.cpp, .rad
+    // containers for radiance.
+    function renderQuantOptions() {
+        const data = AppState.lastQuantData;
+        if (!data) return;
+        const quantSelect = Utils.getEl("quant");
+        const isRadiance = getBackend() === "radiance";
+        const options = isRadiance ? (data.rads || []) : data.quants;
+
+        const mmprojContainer = Utils.getEl("mmproj_container");
+        const mmprojSelect = Utils.getEl("mmproj");
+        mmprojSelect.innerHTML = '<option value="">None</option>';
+        if (!isRadiance && data.mmprojs && data.mmprojs.length > 0) {
+            mmprojContainer.classList.remove("hidden");
+            mmprojSelect.disabled = false;
+            data.mmprojs.forEach(q => {
+                const opt = document.createElement("option");
+                opt.value = q.name;
+                opt.textContent = `${q.name} (${q.size_str})`;
+                mmprojSelect.appendChild(opt);
+            });
+        } else {
+            mmprojContainer.classList.add("hidden");
+            mmprojSelect.disabled = true;
+        }
+
+        if (options.length === 0) {
+            quantSelect.innerHTML = isRadiance
+                ? '<option value="">No .rad containers found</option>'
+                : '<option value="">No GGUF quants found</option>';
+            quantSelect.disabled = true;
+            return;
+        }
+
+        quantSelect.innerHTML = "";
+        options.forEach(q => {
+            const opt = document.createElement("option");
+            opt.value = q.name;
+            opt.textContent = `${q.name} (${q.size_str})`;
+            quantSelect.appendChild(opt);
+        });
+
+        const largestQ4 = isRadiance ? null : options.find(q => q.name.includes("Q4"));
+        quantSelect.value = largestQ4 ? largestQ4.name : options[0].name;
+        quantSelect.disabled = false;
     }
 
     function validateJson() {
@@ -155,7 +272,9 @@ const Form = (() => {
             symlink_name: Utils.getEl("symlink_name").value,
             original_name: Utils.getEl("original_name").value,
             parameters: Utils.getEl("parameters").value,
-            revision: getSelectedRevision()
+            revision: getSelectedRevision(),
+            backend: getBackend(),
+            gpu: Utils.getEl("gpu").value || "all"
         };
 
         try {
@@ -209,6 +328,8 @@ const Form = (() => {
         Utils.getEl("symlink_name").disabled = true;
         Utils.getEl("mmproj").disabled = true;
         AppState.selectedBranch = "main";
+        AppState.lastQuantData = null;
+        setPlacement("llama", "all");
 
         const btn = Utils.getEl("submitBtn");
         btn.textContent = "Provision Model";
@@ -229,5 +350,8 @@ const Form = (() => {
         paramInput.classList.add("border-gray-600", "focus:ring-blue-500");
     }
 
-    return { init, resetForm, getSelectedRevision, syncMtpFromParams, updateMtpHeadVisibility };
+    return {
+        init, resetForm, getSelectedRevision, syncMtpFromParams, updateMtpHeadVisibility,
+        getBackend, setPlacement, radianceEnabled, renderQuantOptions,
+    };
 })();

@@ -63,6 +63,7 @@ const App = (() => {
         title.className = "text-2xl font-bold mb-4 text-yellow-400";
 
         Utils.getEl("hf_repo").value = conf.repo;
+        Form.setPlacement(conf.backend, conf.gpu);
         await Api.fetchQuants(conf.repo).then(data => populateQuants(data, false));
         Utils.getEl("branch_select").disabled = false;
         Utils.getEl("commit_select").disabled = false;
@@ -110,6 +111,7 @@ const App = (() => {
         title.className = "text-2xl font-bold mb-4 text-green-400";
 
         Utils.getEl("hf_repo").value = conf.repo;
+        Form.setPlacement(conf.backend, conf.gpu);
         await Api.fetchQuants(conf.repo).then(data => populateQuants(data, false));
         await fetchCommits(conf.repo, conf.revision);
         populateRevision(conf.revision);
@@ -287,47 +289,21 @@ const App = (() => {
     }
 
     async function populateQuants(data, autoFillSymlink) {
-        const quantSelect = Utils.getEl("quant");
         const symInput = Utils.getEl("symlink_name");
         if (autoFillSymlink && !symInput.value) {
             symInput.value = symInput.value || data.repoName || "";
         }
-        quantSelect.innerHTML = '<option value="">Scanning Hugging Face...</option>';
-        quantSelect.disabled = true;
+        AppState.lastQuantData = data;
 
-        if (data.quants.length === 0) {
-            quantSelect.innerHTML = '<option value="">No GGUF quants found</option>';
+        // A new repo that ships only .rad containers is a radiance repo, and one with GGUFs only
+        // is a llama.cpp repo; a repo with both keeps whatever backend is picked.
+        const hasRads = (data.rads || []).length > 0;
+        if (autoFillSymlink && Form.radianceEnabled() && hasRads !== (data.quants.length > 0)) {
+            Utils.getEl("backend").value = hasRads ? "radiance" : "llama";
+            Utils.getEl("backend").dispatchEvent(new Event("change"));
             return;
         }
-
-        quantSelect.innerHTML = "";
-        data.quants.forEach(q => {
-            const opt = document.createElement("option");
-            opt.value = q.name;
-            opt.textContent = `${q.name} (${q.size_str})`;
-            quantSelect.appendChild(opt);
-        });
-
-        const largestQ4 = data.quants.find(q => q.name.includes("Q4"));
-        quantSelect.value = largestQ4 ? largestQ4.name : data.quants[0].name;
-        quantSelect.disabled = false;
-
-        const mmprojContainer = Utils.getEl("mmproj_container");
-        const mmprojSelect = Utils.getEl("mmproj");
-        mmprojSelect.innerHTML = '<option value="">None</option>';
-        if (data.mmprojs && data.mmprojs.length > 0) {
-            mmprojContainer.classList.remove("hidden");
-            mmprojSelect.disabled = false;
-            data.mmprojs.forEach(q => {
-                const opt = document.createElement("option");
-                opt.value = q.name;
-                opt.textContent = `${q.name} (${q.size_str})`;
-                mmprojSelect.appendChild(opt);
-            });
-        } else {
-            mmprojContainer.classList.add("hidden");
-            mmprojSelect.disabled = true;
-        }
+        Form.renderQuantOptions();
     }
 
     function initRepoDebounce() {

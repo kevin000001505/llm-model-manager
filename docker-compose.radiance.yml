@@ -1,0 +1,16 @@
+# radiance backend (AMD RDNA4, .rad containers). llama-swap starts each radiance config as a
+# sibling container through the docker socket, so this grants llama-swap root on the host.
+# Add to COMPOSE_FILE, or run `RADIANCE=1 ./up.sh up`.
+services:
+  llm-model-manager:
+    environment:
+      # docker run needs the host path of /models.
+      - MODELS_HOST=${MODELS}
+      - RADIANCE_IMAGE=${RADIANCE_IMAGE:-stilldeadcode/radiance:latest}
+      - RADIANCE_GPU=${RADIANCE_GPU:-}
+      - RADIANCE_GROUPS=${RENDER_GID:?set RENDER_GID in .env},${VIDEO_GID:?set VIDEO_GID in .env}
+      - LLAMA_NET=${LLAMA_NET:-llm-llama-net}
+
+  llama-swap:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 
-from backend.config import CACHE_DIR
+from backend.config import CACHE_DIR, RADIANCE_EXT
 from backend.models import ModelSetup
 from backend.state import load_state, save_state
 from backend.sync import sync_system
@@ -18,7 +18,10 @@ log = logging.getLogger(__name__)
 def process_model(req: ModelSetup) -> None:
     """Download via huggingface_hub.snapshot_download with a pre-resolved SHA in req.revision."""
     log.info(f"Starting background download for {req.symlink_name} ({req.revision[:12]})...")
-    patterns = [f"*{req.quant}.gguf", f"*{req.quant}-*-of-*.gguf"]
+    if req.quant.endswith(RADIANCE_EXT):
+        patterns = [req.quant]
+    else:
+        patterns = [f"*{req.quant}.gguf", f"*{req.quant}-*-of-*.gguf"]
     if req.mmproj:
         patterns.append(f"*mmproj*{req.mmproj}*.gguf")
 

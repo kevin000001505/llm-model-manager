@@ -70,6 +70,21 @@
                         </div>
                         <div id="commit_info" class="text-xs text-gray-500 mt-1 hidden"></div>
                     </div>
+                    <div id="placement_row" class="flex gap-2">
+                        <div id="backend_container" class="flex-1 hidden">
+                            <label class="block text-sm text-gray-400">Backend</label>
+                            <select id="backend" class="mt-1 w-full bg-gray-700 border-gray-600 rounded p-2 text-white focus:ring-blue-500">
+                                <option value="llama">llama.cpp (GGUF)</option>
+                                <option value="radiance">radiance (.rad, AMD)</option>
+                            </select>
+                        </div>
+                        <div id="gpu_container" class="flex-1 hidden">
+                            <label class="block text-sm text-gray-400">GPU</label>
+                            <select id="gpu" class="mt-1 w-full bg-gray-700 border-gray-600 rounded p-2 text-white focus:ring-blue-500 disabled:opacity-50">
+                                <option value="all">All GPUs</option>
+                            </select>
+                        </div>
+                    </div>
                     <div>
                         <label class="block text-sm text-gray-400">Quantization *</label>
                         <select id="quant" disabled required class="mt-1 w-full bg-gray-700 border-gray-600 rounded p-2 text-white focus:ring-blue-500 disabled:opacity-50">
@@ -86,7 +101,7 @@
                         <label class="block text-sm text-gray-400">Symlink Name *</label>
                         <input type="text" id="symlink_name" disabled required class="mt-1 w-full bg-gray-700 border-gray-600 rounded p-2 text-white focus:ring-blue-500 disabled:opacity-50">
                     </div>
-                    <div class="bg-gray-900/40 border border-gray-700 rounded p-2">
+                    <div id="mtp_container" class="bg-gray-900/40 border border-gray-700 rounded p-2">
                         <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                             <input type="checkbox" id="mtp_toggle" class="accent-blue-500">
                             <span>Enable MTP (multi-token prediction)</span>

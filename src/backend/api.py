@@ -6,12 +6,13 @@ import shutil
 
 from fastapi import BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 
+from backend import config as cfg
 from backend.cache import scan_cache, prune_unreferenced_revisions
-from backend.config import QUANT_REGEX
+from backend.config import BACKEND_RADIANCE, BACKENDS, GPU_ALL, QUANT_REGEX, RADIANCE_EXT
 from backend.hf_hub import get_branches, get_commits, pre_flight_size, resolve_sha
 from backend.models import ModelSetup, RevisionDeleteReq, RpcModeReq
 from backend.state import format_bytes, iter_configs, load_state, save_state
-from backend.sync import sync_system
+from backend.sync import SAFE_ARG, radiance_args, sync_system
 from backend.websocket import manager
 
 log = logging.getLogger(__name__)
@@ -36,8 +37,12 @@ async def get_quants(repo: str):
         info = api.model_info(repo, files_metadata=True)
         quants_dict = {}
         mmproj_dict = {}
+        rads = []
 
         for f in info.siblings:
+            if f.rfilename.endswith(RADIANCE_EXT):
+                rads.append({"name": f.rfilename, "size_str": format_bytes(f.size or 0), "raw": f.size or 0})
+                continue
             if not f.rfilename.endswith(".gguf"):
                 continue
             match = re.search(QUANT_REGEX, f.rfilename, re.IGNORECASE)
@@ -55,8 +60,10 @@ async def get_quants(repo: str):
         mmproj_list = [{"name": q, "size_str": format_bytes(s), "raw": s} for q, s in mmproj_dict.items()]
         mmproj_list.sort(key=lambda x: x["raw"], reverse=True)
 
+        rads.sort(key=lambda x: x["raw"], reverse=True)
+
         repo_name = repo.rsplit("/", 1)[-1] if "/" in repo else repo
-        return {"quants": quants_list, "mmprojs": mmproj_list, "repoName": repo_name}
+        return {"quants": quants_list, "mmprojs": mmproj_list, "rads": rads, "repoName": repo_name}
     except Exception as e:
         log.error(f"Failed to fetch quants for {repo}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -114,13 +121,14 @@ async def get_local_models():
         for rev in sorted(repo.revisions, key=lambda r: r.last_modified, reverse=True):
             files = []
             for cf in sorted(rev.files, key=lambda f: f.file_name):
-                if not cf.file_name.endswith(".gguf"):
+                is_rad = cf.file_name.endswith(RADIANCE_EXT)
+                if not is_rad and not cf.file_name.endswith(".gguf"):
                     continue
-                match = re.search(QUANT_REGEX, cf.file_name, re.IGNORECASE)
+                match = None if is_rad else re.search(QUANT_REGEX, cf.file_name, re.IGNORECASE)
                 files.append({
                     "name": cf.file_name,
                     "size_str": format_bytes(cf.size_on_disk),
-                    "quant": match.group(1).upper() if match else None,
+                    "quant": "RAD" if is_rad else (match.group(1).upper() if match else None),
                     "is_mmproj": "mmproj" in cf.file_name.lower(),
                 })
             if not files:
@@ -142,6 +150,38 @@ async def get_local_models():
             "revisions": revisions,
         })
     return {"models": models}
+
+
+# --- API: GPUs ---
+async def get_gpus():
+    """The GPUs a config can be placed on, and whether the radiance backend is available."""
+    return {
+        "gpus": [{"name": name, "device": device} for name, device in cfg.GPUS.items()],
+        "radiance": {
+            "enabled": bool(cfg.MODELS_HOST),
+            "gpu": cfg.RADIANCE_GPU if cfg.RADIANCE_GPU in cfg.GPUS else GPU_ALL,
+        },
+    }
+
+
+def validate_placement(req: ModelSetup) -> None:
+    """Normalise req.backend/req.gpu, raising 400 on a combination that can't be served."""
+    if req.backend not in BACKENDS:
+        raise HTTPException(status_code=400, detail=f"Unknown backend '{req.backend}' (expected one of {', '.join(BACKENDS)}).")
+    if req.backend == BACKEND_RADIANCE:
+        if not cfg.MODELS_HOST:
+            raise HTTPException(status_code=400, detail="radiance backend is off: set MODELS_HOST (the host path of /models).")
+        if not req.quant.endswith(RADIANCE_EXT):
+            raise HTTPException(status_code=400, detail=f"radiance serves {RADIANCE_EXT} containers; '{req.quant}' is not one.")
+        if not SAFE_ARG.match(req.symlink_name):
+            raise HTTPException(status_code=400, detail="radiance config names may only use letters, digits and _./:=,+@-.")
+        req.mmproj = ""
+        req.gpu = cfg.RADIANCE_GPU if cfg.RADIANCE_GPU in cfg.GPUS else GPU_ALL
+        return
+    if req.quant.endswith(RADIANCE_EXT):
+        raise HTTPException(status_code=400, detail=f"llama.cpp serves GGUF files; pick the radiance backend for {RADIANCE_EXT}.")
+    if req.gpu != GPU_ALL and req.gpu not in cfg.GPUS:
+        raise HTTPException(status_code=400, detail=f"Unknown GPU '{req.gpu}' (configured: {', '.join(cfg.GPUS) or 'none'}).")
 
 
 # --- API: RPC Mode ---
@@ -197,7 +237,14 @@ async def delete_revision(req: RevisionDeleteReq):
 async def setup_model(req: ModelSetup, background_tasks: BackgroundTasks):
     from backend.download import process_model
 
-    req.symlink_name = req.symlink_name.replace("/", "-")
+    req.symlink_name = req.symlink_name.strip().replace("/", "-")
+    req.quant = req.quant.strip()
+    # An empty quant downloads every GGUF in the repo, and an empty name makes a config that
+    # DELETE /api/configs/{name} can't reach, which pins its revision for good.
+    if not req.symlink_name:
+        raise HTTPException(status_code=400, detail="Config name (symlink name) is required.")
+    if not req.quant:
+        raise HTTPException(status_code=400, detail="Pick a quant (or .rad file) to download.")
     if req.original_name:
         req.original_name = req.original_name.replace("/", "-")
     log.info(f"Setup {req.symlink_name} ({req.quant}, rev={req.revision[:12] if req.revision != 'latest' else 'latest'})")
@@ -206,6 +253,13 @@ async def setup_model(req: ModelSetup, background_tasks: BackgroundTasks):
         params_dict = json.loads(req.parameters) if req.parameters.strip() else {}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    validate_placement(req)
+    if req.backend == BACKEND_RADIANCE:
+        try:
+            radiance_args(params_dict)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     try:
         ref = "main" if req.revision == "latest" else req.revision
@@ -254,6 +308,8 @@ async def setup_model(req: ModelSetup, background_tasks: BackgroundTasks):
         "params": params_dict,
         "status": "downloading" if needs_download else "ready",
         "revision": resolved_sha,
+        "backend": req.backend,
+        "gpu": req.gpu,
     }
     save_state(state)
 

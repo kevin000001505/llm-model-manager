@@ -3,7 +3,7 @@ import re
 
 from huggingface_hub import HfApi
 
-from backend.config import QUANT_REGEX
+from backend.config import QUANT_REGEX, RADIANCE_EXT
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ def get_commits(repo: str, limit: int = 50, revision: str = "main") -> list:
 def pre_flight_size(repo: str, sha: str, quant: str, mmproj: str) -> int:
     api = HfApi(token=None)
     info = api.model_info(repo, revision=sha, files_metadata=True)
+    if quant.endswith(RADIANCE_EXT):
+        # A radiance "quant" is the container's filename: one file holds the whole model.
+        return sum(f.size or 0 for f in info.siblings if f.rfilename == quant)
     total = 0
     for f in info.siblings:
         if not f.size or not f.rfilename.endswith(".gguf"):

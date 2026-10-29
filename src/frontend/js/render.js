@@ -60,6 +60,7 @@ const Render = (() => {
         const revisionBadge = revision
             ? `<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded border border-gray-600 font-mono tracking-wider shadow-sm" title="Commit: ${Utils.escapeHtml(revision)}">${Utils.shortSha(revision)}...</span>`
             : "";
+        const placementBadge = buildPlacementBadge(conf);
 
         return `
             <div class="flex justify-between items-start">
@@ -68,6 +69,7 @@ const Render = (() => {
                         <span class="truncate">${Utils.escapeHtml(name)}</span>
                         <span class="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded border border-blue-700 font-mono tracking-wider shadow-sm">${Utils.escapeHtml(quant)}</span>
                         ${revisionBadge}
+                        ${placementBadge}
                         ${statusBadge}
                     </h3>
                     <p class="text-xs text-gray-500 mb-3 font-mono mt-1 truncate">Repo: ${Utils.escapeHtml(repo)}</p>
@@ -77,6 +79,15 @@ const Render = (() => {
             </div>
             ${progressUI}
         `;
+    }
+
+    // Which engine and card a config runs on; nothing for the plain llama.cpp-on-all-GPUs default.
+    function buildPlacementBadge(conf) {
+        const isRadiance = conf.backend === "radiance";
+        const gpu = conf.gpu && conf.gpu !== "all" ? conf.gpu : "";
+        if (!isRadiance && !gpu) return "";
+        const label = [isRadiance ? "radiance" : "", gpu].filter(Boolean).join(" · ");
+        return `<span class="text-xs bg-purple-900 text-purple-300 px-2 py-0.5 rounded border border-purple-700 font-mono tracking-wider shadow-sm">${Utils.escapeHtml(label)}</span>`;
     }
 
     function buildStatusBadge(conf) {

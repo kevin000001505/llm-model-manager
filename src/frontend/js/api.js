@@ -27,6 +27,12 @@ const Api = (() => {
         return res.json();
     }
 
+    async function fetchGpus() {
+        const res = await fetch("/api/gpus");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+    }
+
     async function fetchLocalModels() {
         const res = await fetch("/api/models");
         return res.json();
@@ -60,6 +66,7 @@ const Api = (() => {
         fetchBranches,
         fetchQuants,
         fetchCommits,
+        fetchGpus,
         fetchLocalModels,
         setupConfig,
         deleteConfig,
