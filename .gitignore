@@ -1,2 +1,10 @@
 .env
 build.sh
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Generated CSS
+src/frontend/static/

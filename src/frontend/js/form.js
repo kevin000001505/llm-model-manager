@@ -1,0 +1,357 @@
+// Form handling and validation
+const Form = (() => {
+    const defaultParams = AppState.getDefaultParams();
+    let mmprojSelect, symlinkInput, paramInput;
+
+    function init() {
+        mmprojSelect = Utils.getEl("mmproj");
+        symlinkInput = Utils.getEl("symlink_name");
+        paramInput = Utils.getEl("parameters");
+        paramInput.value = JSON.stringify(defaultParams, null, 2);
+
+        mmprojSelect.addEventListener("change", updateMmprojJSON);
+        symlinkInput.addEventListener("input", updateMmprojJSON);
+
+        Utils.getEl("mtp_toggle").addEventListener("change", updateMtpJSON);
+        Utils.getEl("mtp_n_max").addEventListener("input", updateMtpJSON);
+
+        paramInput.addEventListener("input", validateJson);
+        paramInput.addEventListener("blur", autoFormatJson);
+
+        Utils.getEl("setupForm").addEventListener("submit", handleFormSubmit);
+        Utils.getEl("commit_select").addEventListener("change", onCommitSelectChange);
+        Utils.getEl("commit_sha").addEventListener("input", onCommitShaInput);
+        Utils.getEl("backend").addEventListener("change", () => applyBackend(true));
+
+        loadGpus();
+    }
+
+    // --- Backend & GPU placement ---
+    async function loadGpus() {
+        try {
+            AppState.gpuInfo = await Api.fetchGpus();
+        } catch (e) {
+            console.error("fetchGpus failed:", e);
+            return;
+        }
+        const { gpus, radiance } = AppState.gpuInfo;
+        const gpuSelect = Utils.getEl("gpu");
+        gpuSelect.innerHTML = '<option value="all">All GPUs</option>';
+        gpus.forEach(g => {
+            const opt = document.createElement("option");
+            opt.value = g.name;
+            opt.textContent = `${g.name} (${g.device})`;
+            gpuSelect.appendChild(opt);
+        });
+        Utils.getEl("gpu_container").classList.toggle("hidden", gpus.length === 0);
+        Utils.getEl("backend_container").classList.toggle("hidden", !radiance.enabled);
+    }
+
+    function radianceEnabled() {
+        return AppState.gpuInfo.radiance.enabled;
+    }
+
+    function getBackend() {
+        return Utils.getEl("backend").value;
+    }
+
+    function sameParams(a, b) {
+        try {
+            return JSON.stringify(JSON.parse(a)) === JSON.stringify(b);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // radiance runs on its own GPU, takes no mmproj and has no MTP toggle; llama.cpp gets them back.
+    // With swapDefaults, untouched default params are swapped for the other backend's defaults.
+    function applyBackend(swapDefaults) {
+        const isRadiance = getBackend() === "radiance";
+        const gpuSelect = Utils.getEl("gpu");
+        if (isRadiance) {
+            gpuSelect.value = AppState.gpuInfo.radiance.gpu;
+        }
+        gpuSelect.disabled = isRadiance;
+        Utils.getEl("mtp_container").classList.toggle("hidden", isRadiance);
+
+        if (swapDefaults) {
+            const llamaDefaults = AppState.getDefaultParams();
+            const radianceDefaults = AppState.getRadianceDefaultParams();
+            if (isRadiance && sameParams(paramInput.value, llamaDefaults)) {
+                paramInput.value = JSON.stringify(radianceDefaults, null, 2);
+            } else if (!isRadiance && sameParams(paramInput.value, radianceDefaults)) {
+                paramInput.value = JSON.stringify(llamaDefaults, null, 2);
+            }
+            paramInput.dispatchEvent(new Event("input"));
+        }
+        renderQuantOptions();
+    }
+
+    function setPlacement(backend, gpu) {
+        Utils.getEl("backend").value = backend === "radiance" && radianceEnabled() ? "radiance" : "llama";
+        Utils.getEl("gpu").value = gpu || "all";
+        applyBackend(false);
+    }
+
+    // Fill the quant select from the last /api/quants answer: GGUF quants for llama.cpp, .rad
+    // containers for radiance.
+    function renderQuantOptions() {
+        const data = AppState.lastQuantData;
+        if (!data) return;
+        const quantSelect = Utils.getEl("quant");
+        const isRadiance = getBackend() === "radiance";
+        const options = isRadiance ? (data.rads || []) : data.quants;
+
+        const mmprojContainer = Utils.getEl("mmproj_container");
+        const mmprojSelect = Utils.getEl("mmproj");
+        mmprojSelect.innerHTML = '<option value="">None</option>';
+        if (!isRadiance && data.mmprojs && data.mmprojs.length > 0) {
+            mmprojContainer.classList.remove("hidden");
+            mmprojSelect.disabled = false;
+            data.mmprojs.forEach(q => {
+                const opt = document.createElement("option");
+                opt.value = q.name;
+                opt.textContent = `${q.name} (${q.size_str})`;
+                mmprojSelect.appendChild(opt);
+            });
+        } else {
+            mmprojContainer.classList.add("hidden");
+            mmprojSelect.disabled = true;
+        }
+
+        if (options.length === 0) {
+            quantSelect.innerHTML = isRadiance
+                ? '<option value="">No .rad containers found</option>'
+                : '<option value="">No GGUF quants found</option>';
+            quantSelect.disabled = true;
+            return;
+        }
+
+        quantSelect.innerHTML = "";
+        options.forEach(q => {
+            const opt = document.createElement("option");
+            opt.value = q.name;
+            opt.textContent = `${q.name} (${q.size_str})`;
+            quantSelect.appendChild(opt);
+        });
+
+        const largestQ4 = isRadiance ? null : options.find(q => q.name.includes("Q4"));
+        quantSelect.value = largestQ4 ? largestQ4.name : options[0].name;
+        quantSelect.disabled = false;
+    }
+
+    function validateJson() {
+        if (!paramInput.value.trim()) {
+            paramInput.classList.remove("border-red-500", "focus:ring-red-500", "border-green-500", "focus:ring-green-500");
+            paramInput.classList.add("border-gray-600", "focus:ring-blue-500");
+            return;
+        }
+        try {
+            JSON.parse(paramInput.value);
+            paramInput.classList.remove("border-red-500", "focus:ring-red-500", "border-gray-600", "focus:ring-blue-500");
+            paramInput.classList.add("border-green-500", "focus:ring-green-500");
+        } catch (e) {
+            paramInput.classList.remove("border-green-500", "focus:ring-green-500", "border-gray-600", "focus:ring-blue-500");
+            paramInput.classList.add("border-red-500", "focus:ring-red-500");
+        }
+    }
+
+    function autoFormatJson() {
+        if (!paramInput.value.trim()) return;
+        try {
+            const parsed = JSON.parse(paramInput.value);
+            paramInput.value = JSON.stringify(parsed, null, 2);
+        } catch (e) {}
+    }
+
+    function updateMmprojJSON() {
+        const val = mmprojSelect.value;
+        const sym = symlinkInput.value || "model";
+        try {
+            const parsed = JSON.parse(paramInput.value);
+            if (val) {
+                parsed["mmproj"] = `/models/served/${sym}-mmproj-${val.toUpperCase()}.gguf`;
+            } else {
+                delete parsed["mmproj"];
+            }
+            paramInput.value = JSON.stringify(parsed, null, 2);
+            paramInput.dispatchEvent(new Event("input"));
+        } catch (e) {}
+    }
+
+    // Heuristic: a grafted-MTP repo carries "mtp" as a token in its name (e.g.
+    // unsloth/Qwen3.6-27B-MTP-GGUF) and bakes the MTP head into the quant file.
+    // Anything else needs a separate runtime head (gemma-style), so we surface the
+    // head-repo field for those.
+    function repoLooksGrafted() {
+        const repo = (Utils.getEl("hf_repo").value || "");
+        return /(^|[\/\-_.])mtp([\/\-_.]|$)/i.test(repo);
+    }
+
+    // Show the MTP head-repo field only when MTP is on AND the model isn't grafted.
+    function updateMtpHeadVisibility() {
+        const on = Utils.getEl("mtp_toggle").checked;
+        const show = on && !repoLooksGrafted();
+        Utils.getEl("mtp_head_repo_row").classList.toggle("hidden", !show);
+    }
+
+    // MTP helper: inject/remove spec-type=draft-mtp (+ spec-draft-n-max) in the params JSON.
+    // This only wires the flags — the model itself must be an MTP-prepared GGUF.
+    function updateMtpJSON() {
+        const toggle = Utils.getEl("mtp_toggle");
+        const nMaxInput = Utils.getEl("mtp_n_max");
+        Utils.getEl("mtp_options").classList.toggle("hidden", !toggle.checked);
+        updateMtpHeadVisibility();
+        try {
+            const parsed = JSON.parse(paramInput.value);
+            if (toggle.checked) {
+                parsed["spec-type"] = "draft-mtp";
+                parsed["spec-draft-n-max"] = parseInt(nMaxInput.value, 10) || 2;
+            } else {
+                delete parsed["spec-type"];
+                delete parsed["spec-draft-n-max"];
+            }
+            paramInput.value = JSON.stringify(parsed, null, 2);
+            paramInput.dispatchEvent(new Event("input"));
+        } catch (e) {}
+    }
+
+    // Reflect MTP state from the current params JSON (used on edit / load).
+    function syncMtpFromParams() {
+        const toggle = Utils.getEl("mtp_toggle");
+        const nMaxInput = Utils.getEl("mtp_n_max");
+        try {
+            const parsed = JSON.parse(paramInput.value);
+            const on = parsed["spec-type"] === "draft-mtp";
+            toggle.checked = on;
+            if (on && parsed["spec-draft-n-max"] != null) {
+                nMaxInput.value = parsed["spec-draft-n-max"];
+            }
+            Utils.getEl("mtp_options").classList.toggle("hidden", !on);
+            updateMtpHeadVisibility();
+        } catch (e) {}
+    }
+
+    function onCommitSelectChange() {
+        const shaInput = Utils.getEl("commit_sha");
+        if (this.value === "latest") {
+            shaInput.value = "";
+        }
+    }
+
+    function onCommitShaInput() {
+        const select = Utils.getEl("commit_select");
+        if (this.value.trim()) {
+            select.value = "custom";
+        }
+    }
+
+    function getSelectedRevision() {
+        const select = Utils.getEl("commit_select");
+        const shaInput = Utils.getEl("commit_sha");
+        if (shaInput.value.trim()) {
+            return shaInput.value.trim();
+        }
+        if (select.value === "latest") {
+            return AppState.selectedBranch || "main";
+        }
+        return select.value || "latest";
+    }
+
+    async function handleFormSubmit(e) {
+        e.preventDefault();
+        const btn = Utils.getEl("submitBtn");
+        btn.disabled = true;
+        btn.classList.add("opacity-50");
+        Utils.showStatus("Checking storage and initializing...", "warning");
+
+        const payload = {
+            hf_repo: Utils.getEl("hf_repo").value,
+            quant: Utils.getEl("quant").value,
+            mmproj: Utils.getEl("mmproj").value,
+            symlink_name: Utils.getEl("symlink_name").value,
+            original_name: Utils.getEl("original_name").value,
+            parameters: Utils.getEl("parameters").value,
+            revision: getSelectedRevision(),
+            backend: getBackend(),
+            gpu: Utils.getEl("gpu").value || "all"
+        };
+
+        try {
+            const data = await Api.setupConfig(payload);
+            if (data.status && data.status.includes("Warning")) {
+                Utils.showStatus(data.status, "warning");
+            } else if (data.status) {
+                Utils.showStatus(data.status, "success");
+            } else {
+                Utils.showStatus("Error: " + (data.detail || "Invalid parameters"), "error");
+                btn.disabled = false;
+                btn.classList.remove("opacity-50");
+                return;
+            }
+            setTimeout(() => {
+                resetForm();
+                btn.disabled = false;
+                btn.classList.remove("opacity-50");
+                LocalModels.fetch();
+            }, 3500);
+        } catch (e) {
+            Utils.showStatus("Network error occurred.", "error");
+            btn.disabled = false;
+            btn.classList.remove("opacity-50");
+        }
+    }
+
+    function resetForm() {
+        const title = Utils.getEl("formTitle");
+        title.textContent = "Deploy New Config";
+        title.className = "text-2xl font-bold mb-4 text-blue-400";
+
+        Utils.getEl("hf_repo").value = "";
+        Utils.getEl("setupForm").reset();
+        Utils.getEl("original_name").value = "";
+        Utils.getEl("quant").innerHTML = '<option value="">Paste repo above to load quants...</option>';
+        Utils.getEl("quant").disabled = true;
+        Utils.getEl("mmproj_container").classList.add("hidden");
+        Utils.getEl("commit_select").innerHTML = '<option value="">Enter a repo first</option>';
+        Utils.getEl("commit_select").disabled = true;
+        Utils.getEl("commit_sha").value = "";
+        Utils.getEl("commit_sha").disabled = true;
+        Utils.getEl("commit_sha").placeholder = "Enter a repo first";
+        Utils.getEl("commit_info").classList.add("hidden");
+        Utils.getEl("branch_select").innerHTML = '<option value="">Enter a repo first</option>';
+        Utils.getEl("branch_select").disabled = true;
+        AppState.selectedBranch = "main";
+        AppState.lastCommitsStr = "";
+        Utils.getEl("quant").innerHTML = '<option value="">Enter a repo first</option>';
+        Utils.getEl("quant").disabled = true;
+        Utils.getEl("symlink_name").disabled = true;
+        Utils.getEl("mmproj").disabled = true;
+        AppState.selectedBranch = "main";
+        AppState.lastQuantData = null;
+        setPlacement("llama", "all");
+
+        const btn = Utils.getEl("submitBtn");
+        btn.textContent = "Provision Model";
+        btn.className = "flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition shadow";
+
+        const clearBtn = Utils.getEl("clearBtn");
+        clearBtn.textContent = "Clear";
+        clearBtn.className = "bg-gray-600 hover:bg-gray-500 text-white py-2 px-4 rounded transition shadow";
+
+        paramInput.value = JSON.stringify(defaultParams, null, 2);
+        Utils.getEl("mtp_toggle").checked = false;
+        Utils.getEl("mtp_options").classList.add("hidden");
+        Utils.getEl("mtp_head_repo").value = "";
+        Utils.getEl("mtp_head_repo_row").classList.add("hidden");
+        Utils.hideStatus();
+
+        paramInput.classList.remove("border-red-500", "focus:ring-red-500", "border-green-500", "focus:ring-green-500");
+        paramInput.classList.add("border-gray-600", "focus:ring-blue-500");
+    }
+
+    return {
+        init, resetForm, getSelectedRevision, syncMtpFromParams, updateMtpHeadVisibility,
+        getBackend, setPlacement, radianceEnabled, renderQuantOptions,
+    };
+})();
