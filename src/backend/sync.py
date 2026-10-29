@@ -272,6 +272,9 @@ def sync_system(state: dict, restart: bool = True) -> None:
         if cfg.GPUS and not ({"dev", "device"} & params.keys()):
             devices = list(cfg.GPUS.values()) if gpu == GPU_ALL else [cfg.GPUS[gpu]]
             cmd_args.extend(["--device", ",".join(devices)])
+        # Token counters on /metrics for the exporter (docker-compose.metrics.yml).
+        if "metrics" not in params:
+            cmd_args.append("--metrics")
 
         for k, v in params.items():
             if k in ("host", "port", "model", "mmproj"):
