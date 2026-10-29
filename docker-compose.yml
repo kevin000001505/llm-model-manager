@@ -48,4 +48,6 @@ services:
       - llama-net
     volumes:
       - ${MODELS}:/models
-    command: --config /models/served/config.yaml
+    # -watch-config: llm-model-manager rewrites config.yaml at startup too, possibly after
+    # llama-swap has read it; reload on change instead of serving the stale copy.
+    command: --config /models/served/config.yaml -watch-config

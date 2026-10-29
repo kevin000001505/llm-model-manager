@@ -1,0 +1,28 @@
+# GPU + LLM exporter (exporter/exporter.py) for Prometheus on :9835. Add to COMPOSE_FILE.
+# VRAM per card and per process, busy time and clocks, and the /metrics of every loaded
+# model (llama-server --metrics, radiance) labelled with model, backend and gpu.
+services:
+  llm-exporter:
+    build:
+      context: exporter
+    image: local/llm-exporter:latest
+    container_name: llm-exporter
+    restart: unless-stopped
+    # VRAM per process is read from /proc/<pid>/fdinfo of every GPU client on the host;
+    # reading another process's fdinfo is a ptrace-read check.
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+    read_only: true
+    # On llama-swap's network: llama-servers are reached at llama-swap:<port> and radiance
+    # containers by name.
+    networks:
+      - llama-net
+    ports:
+      - "9835:9835"
+    environment:
+      - GPU_PCI=${GPU_PCI:-}
+      - GPUS=${GPUS:-}
+      - GPU_VRAM_MIB=${GPU_VRAM_MIB:-}
+      - RADIANCE_GPU=${RADIANCE_GPU:-}
+      - LLAMA_SWAP=http://llama-swap:8080

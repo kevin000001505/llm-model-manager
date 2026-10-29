@@ -91,6 +91,11 @@ class TestLlamaPlacement:
         assert "--device" not in cmd
         assert "-dev Vulkan0" in cmd
 
+    def test_metrics_endpoint_on(self, tmp_state_dir):
+        cfg, _ = run_sync(tmp_state_dir, [gguf("a"), gguf("b", params={"metrics": False})], gpus={})
+        assert cfg["models"]["a-Q4_K_M"]["cmd"].count("--metrics") == 1
+        assert "--metrics" not in cfg["models"]["b-Q4_K_M"]["cmd"]
+
     def test_no_gpus_keeps_old_config(self, tmp_state_dir):
         cfg, _ = run_sync(tmp_state_dir, [gguf("a", gpu="b50"), gguf("b")], gpus={})
         assert "--device" not in cfg["models"]["a-Q4_K_M"]["cmd"]
